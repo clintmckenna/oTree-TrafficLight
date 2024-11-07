@@ -1,0 +1,194 @@
+{{ extends "trafficlight/Page.html" }}
+
+{{ block title }}
+{{ endblock }}
+
+{{ block scripts}}
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+
+<script>
+  
+$(document).ready(function() {
+    // Initial setup
+    $('#spaceFooter').focus();
+    $('#spaceFooter').show();
+    
+    let position = 0;
+    let currentLight = 0;
+    const moveSpeed = 2;
+    let active = false;
+    let eventLog = [];
+    let loadTime;
+    let movementInterval;
+    let canWalk = false;
+    let timerInterval;
+    let seconds = 0;
+    let milliseconds = 0;
+    let funds = 8.00;
+    let lightChangeTimeouts = new Array(5).fill(null);
+    let isCompleted = false;
+    let isMoving = false;  // Flag to track if character is moving
+
+    // Calculate positions for traffic lights
+    const screenWidth = $(window).width();
+    const spacing = screenWidth / 6;
+    const lightPositions = [];
+
+    // Create and position traffic lights
+    for(let i = 1; i <= 5; i++) {
+        const light = $('<div class="traffic-light"><img src={{ static "trafficlight/redlight.svg" }}></div>');
+        const position = i * spacing;
+        lightPositions.push(position);
+        light.css('left', position + 'px');
+        $('#trafficGrid').append(light);
+    }
+
+    function updateTimer() {
+      milliseconds += 10;
+      if (milliseconds >= 1000) {
+          seconds++;
+          milliseconds = 0;
+          funds = Math.max(0, 8.00 - seconds * 0.08);
+          const formattedFunds = funds.toFixed(2);
+          $('#funds').text(`Funds: $${formattedFunds}`);
+      }
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      $('#timer').text(
+          `Time: ${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}.${(milliseconds / 10).toString().padStart(2, '0')}`
+      );
+  }
+    function logEvent(eventType, lightIndex = null) {
+        const eventTime = (new Date().getTime() - loadTime) / 1000;
+        const eventEntry = {
+            time: eventTime.toFixed(2),
+            currentlight: lightIndex !== null ? lightIndex + 1 : null, // Add 1 to start light numbering at 1
+            funds: funds.toFixed(2), // Record current funds
+            event: eventType
+        };
+        eventLog.push(eventEntry);
+        updateLog();
+    }
+
+    function updateLog() {
+        $('#moveLog').html(eventLog.map(e => JSON.stringify(e)).join('<br>')); // Display in readable format for debugging
+        liveSend({
+          'eventLog': JSON.stringify(eventLog)
+        });
+    }
+
+    $(document).on('keyup', function(event) {
+      if (event.keyCode === 32 && !active) {
+          active = true;
+          loadTime = new Date().getTime();
+
+          // Reveal all hidden elements
+          $('.hidden').removeClass('hidden');
+
+          $('#trafficGrid').addClass('active');
+          $('#spaceFooter').hide();
+          startMovement();
+
+          timerInterval = setInterval(updateTimer, 10);
+
+      }
+  });
+
+    function startMovement() {
+        const walkDuration = 4000; // 4 seconds to walk between lights
+        isMoving = true;
+
+        const movePerFrame = ((currentLight >= 5 ? screenWidth : lightPositions[currentLight] - 20) - position) / (walkDuration / 50);
+
+        movementInterval = setInterval(function() {
+            if (currentLight >= 5) {
+                position += movePerFrame;
+                $('.guy').css('left', position + 'px');
+
+                if (position >= screenWidth && !isCompleted) {
+                    isCompleted = true;
+                    clearInterval(movementInterval);
+                    clearInterval(timerInterval);
+
+                    // Log the end of the task
+                    logEvent('page submit', currentLight);
+
+                    liveSend({
+                        'eventLog': JSON.stringify(eventLog)
+                    });
+
+                    // submit form
+                    document.getElementById("form").submit();
+                    
+                }
+                return;
+            }
+
+            const targetPosition = lightPositions[currentLight] - 20;
+
+            if (position >= targetPosition) {
+                clearInterval(movementInterval);
+                isMoving = false;
+
+                logEvent('arrived at light', currentLight);
+
+                const currentLightIndex = currentLight;
+                lightChangeTimeouts[currentLightIndex] = setTimeout(function() {
+                    $('.traffic-light').eq(currentLightIndex).find('img')
+                        .attr('src', '{{ static "trafficlight/greenlight.svg" }}');
+
+                    logEvent('green light', currentLightIndex);
+                }, 5000);
+
+                return;
+            }
+
+            position += movePerFrame;
+            $('.guy').css('left', position + 'px');
+        }, 50);
+    }
+
+    $('#walkButton').on('click', function(e) {
+        e.preventDefault();
+
+        if (isMoving || !active) return;
+
+        logEvent('walk button pressed', currentLight); // Log which light the character is leaving
+
+        currentLight++; // Move to the next light
+        startMovement();
+    });
+
+    $(document).on('keydown', function(event) {
+        if ([32, 37, 38, 39, 40].indexOf(event.keyCode) > -1) {
+            event.preventDefault();
+        }
+    });
+});
+</script>
+
+{{ endblock }}
+
+{{ block content }}
+<form id="form" method="post">
+    <br><br>
+
+    <div class="spaceFooter" id="spaceFooter">
+        [Press spacebar to start]
+    </div>
+
+    <div class="trafficGrid hidden" id="trafficGrid">
+        <div class="guy">
+            <img src={{ static 'trafficlight/guy.svg' }}>
+        </div>
+    </div>
+
+    <div class="controls hidden">
+        <button id="walkButton" type="button">Walk</button>
+        <div id="timer">Time: 0:00.00</div>
+        <div id="funds">Funds: $8.00</div>
+    </div>
+
+</form>
+{{ endblock }}
